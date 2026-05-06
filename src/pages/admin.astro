@@ -1,0 +1,424 @@
+---
+import MainLayout from '../layouts/MainLayout.astro';
+import { db, User, Role } from 'astro:db';
+import { count, eq } from 'astro:db';
+
+const ITEMS_PER_PAGE = 5;
+const page = Number(Astro.url.searchParams.get('page') ?? 1);
+const search = Astro.url.searchParams.get('search') ?? '';
+const roleFilter = Astro.url.searchParams.get('role') ?? '';
+const offset = (page - 1) * ITEMS_PER_PAGE;
+
+// Stats globales (sin filtro)
+const [{ total }] = await db.select({ total: count() }).from(User);
+const adminsResult = await db.select({ total: count() }).from(User).where(eq(User.role, 'admin'));
+const totalAdmins = adminsResult[0]?.total ?? 0;
+
+// Usuarios con filtros en memoria
+let allUsers = await db.select().from(User);
+if (search) {
+  allUsers = allUsers.filter(u =>
+    u.name.toLowerCase().includes(search.toLowerCase()) ||
+    u.email.toLowerCase().includes(search.toLowerCase())
+  );
+}
+if (roleFilter) {
+  allUsers = allUsers.filter(u => u.role === roleFilter);
+}
+
+const totalFiltered = allUsers.length;
+const totalPages = Math.max(1, Math.ceil(totalFiltered / ITEMS_PER_PAGE));
+const users = allUsers.slice(offset, offset + ITEMS_PER_PAGE);
+
+// Roles para el select de filtro
+const roles = await db.select().from(Role);
+
+function buildUrl(params: Record<string, string | number>) {
+  const merged: Record<string, string> = {};
+  if (search) merged.search = search;
+  if (roleFilter) merged.role = roleFilter;
+  Object.entries(params).forEach(([k, v]) => { merged[k] = String(v); });
+  const qs = Object.entries(merged)
+    .filter(([, v]) => v !== '')
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join('&');
+  return qs ? `?${qs}` : '/admin';
+}
+---
+
+<MainLayout title="Panel Admin">
+  <div class="p-6 px-10 w-full">
+
+    <!-- STATS -->
+    <div class="grid grid-cols-3 gap-4 mb-6">
+      <div class="bg-gray-50 border rounded-lg p-4">
+        <p class="text-sm text-gray-500">Total usuarios</p>
+        <p class="text-3xl font-bold">{total}</p>
+      </div>
+      <div class="bg-gray-50 border rounded-lg p-4">
+        <p class="text-sm text-gray-500">Admins</p>
+        <p class="text-3xl font-bold">{totalAdmins}</p>
+      </div>
+      <div class="bg-gray-50 border rounded-lg p-4">
+        <p class="text-sm text-gray-500">Página actual</p>
+        <p class="text-3xl font-bold">{page}/{totalPages}</p>
+      </div>
+    </div>
+
+    <!-- BARRA DE BÚSQUEDA Y ACCIONES -->
+    <form method="get" class="flex flex-wrap gap-2 items-center mb-4">
+      <input
+        type="text"
+        name="search"
+        value={search}
+        placeholder="Buscar..."
+        class="border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-300"
+      />
+      <select
+        name="role"
+        class="border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-300"
+      >
+        <option value="">Todos los roles</option>
+        {roles.map(r => (
+          <option value={r.id} selected={roleFilter === r.id}>{r.name}</option>
+        ))}
+      </select>
+      <input type="hidden" name="page" value="1" />
+      <button type="submit" class="border px-3 py-2 rounded text-sm hover:bg-gray-50 bg-white">
+        🔍 Buscar
+      </button>
+      {(search || roleFilter) && (
+        <a href="/admin" class="border px-3 py-2 rounded text-sm hover:bg-gray-50 bg-white">
+          ✕ Limpiar
+        </a>
+      )}
+
+      <div class="ml-auto flex gap-2">
+        <button type="button" onclick="window.print()"
+          class="border px-3 py-2 rounded text-sm hover:bg-gray-50 bg-white flex items-center gap-1">
+          🖨️ Imprimir
+        </button>
+        <button type="button" id="btn-export-pdf"
+          class="border px-3 py-2 rounded text-sm hover:bg-gray-50 bg-white flex items-center gap-1">
+          📄 Exportar PDF
+        </button>
+        <button type="button"
+          onclick="document.getElementById('modal-crear').classList.remove('hidden')"
+          class="bg-gray-800 text-white px-4 py-2 rounded text-sm hover:bg-gray-700 flex items-center gap-1">
+          + Agregar usuario
+        </button>
+      </div>
+    </form>
+
+    <!-- TABLA -->
+    <div class="overflow-x-auto rounded border shadow-sm" id="tabla-usuarios">
+      <table class="w-full text-sm bg-white">
+        <thead class="bg-gray-50 text-gray-500 uppercase text-xs tracking-wide">
+          <tr>
+            <th class="p-3 text-left">#</th>
+            <th class="p-3 text-left">Nombre</th>
+            <th class="p-3 text-left">Email</th>
+            <th class="p-3 text-left">Rol</th>
+            <th class="p-3 text-left">Creado</th>
+            <th class="p-3 text-right">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.length === 0 ? (
+            <tr>
+              <td colspan="6" class="p-8 text-center text-gray-400">
+                No se encontraron usuarios
+              </td>
+            </tr>
+          ) : (
+            users.map((u, i) => (
+              <tr class="border-t hover:bg-gray-50 transition-colors">
+                <td class="p-3 text-gray-400">{offset + i + 1}</td>
+                <td class="p-3 font-medium text-gray-800">{u.name}</td>
+                <td class="p-3 text-gray-600">{u.email}</td>
+                <td class="p-3">
+                  <span class={`px-2 py-1 rounded-full text-xs font-semibold ${
+                    u.role === 'admin'
+                      ? 'bg-blue-100 text-blue-700'
+                      : u.role === 'superadmin' || u.role === 'sub user'
+                      ? 'bg-orange-100 text-orange-700'
+                      : 'bg-green-100 text-green-700'
+                  }`}>
+                    {u.role}
+                  </span>
+                </td>
+                <td class="p-3 text-gray-500">
+                  {new Date(u.createdAt).toLocaleDateString('es-ES', {
+                    day: '2-digit', month: '2-digit', year: 'numeric'
+                  })}
+                </td>
+                <td class="p-3">
+                  <div class="flex gap-2 justify-end">
+                    <button
+                      class="btn-editar border border-gray-300 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-50 transition"
+                      data-id={u.id}
+                      data-name={u.name}
+                      data-email={u.email}
+                      data-phone={u.phone ?? ''}
+                      data-address={u.address ?? ''}
+                      data-role={u.role}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      class="btn-eliminar border border-gray-200 text-gray-400 px-2 py-1 rounded text-xs hover:bg-red-50 hover:border-red-200 hover:text-red-400 transition"
+                      data-id={u.id}
+                      data-name={u.name}
+                      title="Eliminar usuario"
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- PAGINACIÓN -->
+    <div class="flex items-center justify-between mt-4">
+      <p class="text-sm text-gray-500">
+        Mostrando {totalFiltered === 0 ? 0 : offset + 1}–{Math.min(offset + ITEMS_PER_PAGE, totalFiltered)} de {totalFiltered} usuarios
+      </p>
+      <div class="flex gap-1 items-center">
+        <a
+          href={page > 1 ? buildUrl({ page: page - 1 }) : '#'}
+          aria-disabled={page <= 1}
+          class={page <= 1
+            ? 'px-3 py-1 rounded border text-sm text-gray-300 pointer-events-none cursor-not-allowed'
+            : 'px-3 py-1 rounded border text-sm hover:bg-gray-100 transition'}
+        >‹</a>
+
+        {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+          <a
+            href={buildUrl({ page: p })}
+            class={p === page
+              ? 'px-3 py-1 rounded border text-sm bg-gray-800 text-white border-gray-800'
+              : 'px-3 py-1 rounded border text-sm hover:bg-gray-100 transition'}
+          >{p}</a>
+        ))}
+
+        <a
+          href={page < totalPages ? buildUrl({ page: page + 1 }) : '#'}
+          aria-disabled={page >= totalPages}
+          class={page >= totalPages
+            ? 'px-3 py-1 rounded border text-sm text-gray-300 pointer-events-none cursor-not-allowed'
+            : 'px-3 py-1 rounded border text-sm hover:bg-gray-100 transition'}
+        >›</a>
+      </div>
+    </div>
+
+    <!-- MODAL CREAR -->
+    <div id="modal-crear" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
+        <h2 class="text-xl font-bold mb-4">Crear Usuario</h2>
+        <form id="form-crear" class="flex flex-col gap-3">
+          <input name="name" placeholder="Nombre" required class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <input name="email" type="email" placeholder="Email" required class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <input name="password" type="password" placeholder="Contraseña" required class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <input name="phone" placeholder="Phone (opcional)" class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <input name="address" placeholder="Address (opcional)" class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <select name="role" class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300">
+            <option value="user">Usuario</option>
+            <option value="admin">Admin</option>
+            <option value="sub user">Sub User</option>
+          </select>
+          <p id="crear-error" class="text-red-500 text-sm hidden"></p>
+          <div class="flex gap-2 justify-end mt-2">
+            <button type="button"
+              onclick="document.getElementById('modal-crear').classList.add('hidden')"
+              class="px-4 py-2 border rounded hover:bg-gray-100">Cancelar</button>
+            <button type="submit"
+              class="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700">Crear</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL EDITAR -->
+    <div id="modal-editar" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
+        <h2 class="text-xl font-bold mb-4">Editar Usuario</h2>
+        <form id="form-editar" class="flex flex-col gap-3">
+          <input id="edit-id" name="id" type="hidden" />
+          <input id="edit-name" name="name" placeholder="Nombre" required class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <input id="edit-email" name="email" type="email" placeholder="Email" required class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <input id="edit-phone" name="phone" placeholder="Phone (opcional)" class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <input id="edit-address" name="address" placeholder="Address (opcional)" class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300" />
+          <select id="edit-role" name="role" class="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-gray-300">
+            <option value="user">Usuario</option>
+            <option value="admin">Admin</option>
+            <option value="sub user">Sub User</option>
+          </select>
+          <p id="editar-error" class="text-red-500 text-sm hidden"></p>
+          <div class="flex gap-2 justify-end mt-2">
+            <button type="button"
+              onclick="document.getElementById('modal-editar').classList.add('hidden')"
+              class="px-4 py-2 border rounded hover:bg-gray-100">Cancelar</button>
+            <button type="submit"
+              class="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-700">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL ELIMINAR -->
+    <div id="modal-eliminar" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 w-full max-w-sm shadow-xl text-center">
+        <h2 class="text-xl font-bold mb-2">¿Eliminar usuario?</h2>
+        <p class="text-gray-600 mb-4">Esta acción no se puede deshacer. ¿Deseas eliminar a <strong id="delete-name"></strong>?</p>
+        <input id="delete-id" type="hidden" />
+        <div class="flex gap-2 justify-center">
+          <button onclick="document.getElementById('modal-eliminar').classList.add('hidden')"
+            class="px-4 py-2 border rounded hover:bg-gray-100">Cancelar</button>
+          <button id="btn-confirm-delete"
+            class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">Eliminar</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</MainLayout>
+
+<script>
+  // === EDITAR ===
+  document.querySelectorAll('.btn-editar').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const b = btn as HTMLElement;
+      (document.getElementById('edit-id') as HTMLInputElement).value = b.dataset.id!;
+      (document.getElementById('edit-name') as HTMLInputElement).value = b.dataset.name!;
+      (document.getElementById('edit-email') as HTMLInputElement).value = b.dataset.email!;
+      (document.getElementById('edit-phone') as HTMLInputElement).value = b.dataset.phone ?? '';
+      (document.getElementById('edit-address') as HTMLInputElement).value = b.dataset.address ?? '';
+      (document.getElementById('edit-role') as HTMLSelectElement).value = b.dataset.role!;
+      document.getElementById('modal-editar')!.classList.remove('hidden');
+    });
+  });
+
+  // === SUBMIT EDITAR ===
+  document.getElementById('form-editar')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = Object.fromEntries(new FormData(form));
+    const errEl = document.getElementById('editar-error')!;
+    errEl.classList.add('hidden');
+    const response = await fetch('/api/users/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (response.ok) {
+      window.location.reload();
+    } else {
+      const err = await response.json().catch(() => ({}));
+      errEl.textContent = (err as any).message ?? 'Error al actualizar';
+      errEl.classList.remove('hidden');
+    }
+  });
+
+  // === SUBMIT CREAR ===
+  document.getElementById('form-crear')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const data = Object.fromEntries(new FormData(form));
+    const errEl = document.getElementById('crear-error')!;
+    errEl.classList.add('hidden');
+    const response = await fetch('/api/users/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (response.ok) {
+      window.location.reload();
+    } else {
+      const err = await response.json().catch(() => ({}));
+      errEl.textContent = (err as any).message ?? 'Error al crear usuario';
+      errEl.classList.remove('hidden');
+    }
+  });
+
+  // === ELIMINAR ===
+  document.querySelectorAll('.btn-eliminar').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const b = btn as HTMLElement;
+      (document.getElementById('delete-id') as HTMLInputElement).value = b.dataset.id!;
+      document.getElementById('delete-name')!.textContent = b.dataset.name!;
+      document.getElementById('modal-eliminar')!.classList.remove('hidden');
+    });
+  });
+
+  document.getElementById('btn-confirm-delete')!.addEventListener('click', async () => {
+    const id = (document.getElementById('delete-id') as HTMLInputElement).value;
+    const response = await fetch('/api/users/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (response.ok) window.location.reload();
+    else alert('Error al eliminar usuario');
+  });
+
+  // === EXPORTAR PDF ===
+  document.getElementById('btn-export-pdf')!.addEventListener('click', async () => {
+    // Cargar jsPDF y autoTable desde CDN
+    if (!(window as any).jspdf) {
+      await new Promise<void>((resolve) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        s.onload = () => resolve();
+        document.head.appendChild(s);
+      });
+    }
+    if (!(window as any).jspdf?.jsPDF?.API?.autoTable) {
+      await new Promise<void>((resolve) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+        s.onload = () => resolve();
+        document.head.appendChild(s);
+      });
+    }
+
+    const { jsPDF } = (window as any).jspdf;
+    const doc = new jsPDF();
+
+    // Título
+    doc.setFontSize(18);
+    doc.text('Lista de Usuarios', 14, 20);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Generado: ${new Date().toLocaleDateString('es-ES')}`, 14, 28);
+
+    // Leer filas de la tabla
+    const rows: string[][] = [];
+    document.querySelectorAll('#tabla-usuarios tbody tr').forEach((tr) => {
+      const cells = tr.querySelectorAll('td');
+      if (cells.length >= 5) {
+        rows.push([
+          cells[0].textContent?.trim() ?? '',
+          cells[1].textContent?.trim() ?? '',
+          cells[2].textContent?.trim() ?? '',
+          cells[3].textContent?.trim() ?? '',
+          cells[4].textContent?.trim() ?? '',
+        ]);
+      }
+    });
+
+    (doc as any).autoTable({
+      head: [['#', 'Nombre', 'Email', 'Rol', 'Creado']],
+      body: rows,
+      startY: 35,
+      styles: { fontSize: 10 },
+      headStyles: { fillColor: [31, 41, 55] },
+      alternateRowStyles: { fillColor: [249, 250, 251] },
+    });
+
+    doc.save('usuarios.pdf');
+  });
+</script>
