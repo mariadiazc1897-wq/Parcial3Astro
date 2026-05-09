@@ -1,9 +1,8 @@
 ---
 interface Props {
     title?: string;
-    isActive?:boolean;
 }
-const {title, isActive} = Astro.props; 
+const {title} = Astro.props; 
 ---
 
 <html lang="en">
@@ -15,7 +14,6 @@ const {title, isActive} = Astro.props;
     <title> { title }</title>
   </head>
   <body>
-
 
 <!-- component -->
 <link href="https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
@@ -33,8 +31,6 @@ const {title, isActive} = Astro.props;
       <slot />
   </div>
 </div>
-
-
 
   </body>
 </html>
