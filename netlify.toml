@@ -1,8 +1,8 @@
 [build]
-  command = "npm run build"
+  command = "astro build --remote"
   publish = "dist"
 
 [build.environment]
   NODE_VERSION = "18"
 
-  
+
