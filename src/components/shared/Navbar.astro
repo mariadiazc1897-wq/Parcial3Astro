@@ -1,0 +1,66 @@
+---
+const { isLoggedIn, user } = Astro.locals;
+
+const initials = user
+  ? (user.name?.charAt(0) ?? user.email.charAt(0)).toUpperCase()
+  : '';
+---
+
+<nav class="flex justify-between px-8 py-3 items-center bg-white border-b">
+  <!-- Logo -->
+  <h1 class="text-lg font-bold text-gray-800">AstroStore</h1>
+
+  <!-- Links del centro -->
+  <div class="flex items-center gap-2">
+    <a href="/"
+      class="border border-gray-300 px-4 py-1.5 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+      Home
+    </a>
+
+    {isLoggedIn && (user?.role === 'admin' || user?.role === 'superadmin') && (
+      <a href="/admin"
+        class="border border-gray-300 px-4 py-1.5 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+        Admin
+      </a>
+    )}
+
+    {isLoggedIn ? (
+      <button id="logout"
+        class="border border-gray-300 px-4 py-1.5 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 transition cursor-pointer">
+        Salir
+      </button>
+    ) : (
+      <a href="/login"
+        class="border border-gray-300 px-4 py-1.5 rounded text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+        Ingresar
+      </a>
+    )}
+  </div>
+
+  <!-- Avatar + info usuario (derecha) — igual a la imagen -->
+  {isLoggedIn && user && (
+    <div class="flex items-center gap-2">
+      <!-- Círculo con iniciales o foto -->
+      <div class="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0 overflow-hidden">
+        {user.avatar
+          ? <img src={user.avatar} alt={user.name} class="w-full h-full object-cover" />
+          : initials
+        }
+      </div>
+      <!-- Nombre y rol — email -->
+      <div class="text-sm leading-tight">
+        <p class="font-semibold text-gray-800">{user.name || 'Usuario'}</p>
+        <p class="text-gray-500 text-xs">{user.role} — {user.email}</p>
+      </div>
+    </div>
+  )}
+</nav>
+
+<script>
+  import { actions } from 'astro:actions';
+
+  document.querySelector('#logout')?.addEventListener('click', async () => {
+    await actions.logout();
+    window.location.href = '/login';
+  });
+</script>
